@@ -1,37 +1,34 @@
 package controller;
-import DTO.UserDTO;
+import config.AuthRequest;
 import lombok.RequiredArgsConstructor;
-import model.Token;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RestController;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.bind.annotation.*;
 import service.AuthenticationService;
 
 @RestController
+@RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Slf4j
 public class AuthenticationController {
-
-    private final AuthenticationService authenticationService;
+    private final AuthenticationService authService;
 
     @PostMapping("/login")
-    public Token login(@RequestBody UserDTO userDTO) {
-        return authenticationService.login(userDTO);
-    }
+    public ResponseEntity<Void> login(@RequestBody AuthRequest authRequest) {
+        log.info("Login attempt for user: {}", authRequest.getUsername());
+        boolean isAuthenticated = authService.authenticate(
+                authRequest.getUsername(),
+                authRequest.getPassword()
+        );
 
-    @PostMapping("/logout")
-    public ResponseEntity<?> logout(@RequestHeader("auth-token") String authToken,
-                                    HttpServletRequest request, HttpServletResponse response)
-    {
-        if (authenticationService.logout(authToken, request, response) == null) {
-            return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+        if (isAuthenticated) {
+            log.info("Login successful for user: {}", authRequest.getUsername());
+            return ResponseEntity.ok().build();
         } else {
-            return ResponseEntity.ok(HttpStatus.OK);
+            log.warn("Login failed for user: {}", authRequest.getUsername());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
     }
+}
 }

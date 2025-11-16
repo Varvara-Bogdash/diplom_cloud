@@ -2,65 +2,103 @@ package controller;
 import DTO.FileDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
+import org.springframework.web.bind.annotation.*;
+
 import service.FileService;
 
 import java.io.File;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
+@RequestMapping("/api/files")
 @RequiredArgsConstructor
 @Slf4j
 public class FileController {
     private final FileService fileService;
 
-    @PostMapping("/file")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ROLE_USER')")
-    public ResponseEntity<Void> uploadFile(@NotNull @RequestPart("file") MultipartFile file,
-                                           @RequestParam("filename") String fileName) {
+    @PostMapping
+    public ResponseEntity<FileDTO> uploadFile(@RequestBody FileDTO fileDTO,
+                                              @RequestHeader("X-User-Id") Long userId) {
+        log.info("Received file upload request: {} from user id: {}", fileDTO.getFilename(), userId);
+        try {
+            File file = fileService.saveFile(
+                    fileDTO.getFilename(),
+                    fileDTO.getContent(),
+                    userId,
+                    fileDTO.getSize()
+            );
 
-        fileService.uploadFile(file, fileName);
-        return new ResponseEntity<>(HttpStatus.OK);
+            FileDTO responseDTO = FileDTO.fromEntity(file);
+            log.info("File uploaded successfully: {}", file.getFilename());
+            return ResponseEntity.ok(responseDTO);
+
+        } catch (RuntimeException e) {
+            log.error("Error uploading file {}: {}", fileDTO.getFilename(), e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
     }
 
-    @DeleteMapping("/file")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ROLE_USER')")
-    public ResponseEntity<Void> deleteFile(@RequestParam("filename") String fileName) {
-        fileService.deleteFile(fileName);
-        return new ResponseEntity<>(HttpStatus.OK);
+    @GetMapping
+    public ResponseEntity<List<FileDTO>> getAllFiles(@RequestHeader("X-User-Id") Long userId) {
+        log.info("Retrieving all files for user id: {}", userId);
+        try {
+            List<File> files = fileService.getAllFiles(userId);
+            List<FileDTO> fileDTOs = files.stream()
+                    .map(FileDTO::fromEntity)
+                    .collect(Collectors.toList());
+
+            log.info("Retrieved {} files for user id: {}", fileDTOs.size(), userId);
+            return ResponseEntity.ok(fileDTOs);
+
+        } catch (Exception e) {
+            log.error("Error retrieving files for user id {}: {}", userId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
-    @GetMapping("/file")
-    @ResponseBody
-    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ROLE_USER')")
-    public ResponseEntity<byte[]> downloadFile(@RequestParam String filename) {
-        FileDTO file = fileService.downloadFile(filename);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(file.getType()))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getFileName() + "\"")
-                .body(((FileDTO) file).getFileByte());
+    @DeleteMapping("/{filename}")
+    public ResponseEntity<Void> deleteFile(@PathVariable String filename,
+                                           @RequestHeader("X-User-Id") Long userId) {
+        log.info("Received request to delete file: {} for user id: {}", filename, userId);
+        try {
+            File file = fileService.findByFilenameAndUserId(filename, userId)
+                    .orElseThrow(() -> {
+                        log.warn("File not found for deletion: {} for user id: {}", filename, userId);
+                        return new RuntimeException("File not found");
+                    });
+
+            fileService.deleteFile(file.getId());
+            log.info("File deleted successfully: {} for user id: {}", filename, userId);
+            return ResponseEntity.ok().build();
+
+        } catch (RuntimeException e) {
+            log.error("Error deleting file {}: {}", filename, e.getMessage());
+            return ResponseEntity.notFound().build();
+        }
     }
 
-    @PutMapping("/file")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ROLE_USER')")
-    public ResponseEntity<Void> EditFileName(@RequestParam String filename, @RequestBody FileDTO fileDTO) {
-        fileService.editFileName(filename, fileDTO);
-        return new ResponseEntity<>(HttpStatus.OK);
-    }
+    @GetMapping("/{filename}")
+    public ResponseEntity<FileDTO> downloadFile(@PathVariable String filename,
+                                                @RequestHeader("X-User-Id") Long userId) {
+        log.info("Received download request for file: {} from user id: {}", filename, userId);
+        try {
+            File file = fileService.findByFilenameAndUserId(filename, userId)
+                    .orElseThrow(() -> {
+                        log.warn("File not found for download: {} for user id: {}", filename, userId);
+                        return new RuntimeException("File not found");
+                    });
 
-    @GetMapping("/list")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN') or hasAuthority('ROLE_USER')")
-    public ResponseEntity<List<File>> getAllFiles(@Min(1) @RequestParam int limit) {
-        return new ResponseEntity<List<File>>((MultiValueMap<String, String>) fileService.getAllFiles(limit), HttpStatus.OK);
+            FileDTO fileDTO = FileDTO.fromEntity(file);
+            log.info("File downloaded successfully: {} for user id: {}", filename, userId);
+            return ResponseEntity.ok(fileDTO);
+
+        } catch (RuntimeException e) {
+            log.error("Error downloading file {}: {}", filename, e.getMessage());
+            return ResponseEntity.notFound().build();
+        }
     }
+}
 }

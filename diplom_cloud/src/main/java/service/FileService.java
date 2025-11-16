@@ -1,142 +1,67 @@
 package service;
-import DTO.FileDTO;
 import entity.User;
-import exception.FileNotFoundException;
-import exception.InvalidInputDataException;
-import exception.UserNotFoundException;
-import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 import repository.FileRepository;
 import repository.UserRepository;
 
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.security.MessageDigest;
+import java.io.File;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 public class FileService {
-
     private final FileRepository fileRepository;
     private final UserRepository userRepository;
 
-    public void uploadFile(@NonNull MultipartFile file, String fileName) {
-        if (file.isEmpty()) {
-            throw new FileNotFoundException("File not found", 0);
+    public File saveFile(String filename, byte[] content, Long userId, Long size) {
+        log.info("Saving file '{}' for user id: {}", filename, userId);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> {
+                    log.error("User not found with id: {}", userId);
+                    return new RuntimeException("User not found");
+                });
+
+        File file = new File();
+        file.setFilename(filename);
+        file.setContent(content);
+        file.setSize(size);
+        file.setUser(user);
+        file.setUploadDate(LocalDateTime.now());
+
+        File savedFile = fileRepository.save(file);
+        log.info("File saved successfully with id: {}", savedFile.getId());
+        return savedFile;
+    }
+
+    public Optional<File> getFile(Long id) {
+        log.debug("Retrieving file by id: {}", id);
+        return fileRepository.findById(id);
+    }
+
+    public List<File> getAllFiles(Long userId) {
+        log.debug("Retrieving all files for user id: {}", userId);
+        return fileRepository.findByUserId(userId);
+    }
+
+    public void deleteFile(Long id) {
+        log.info("Deleting file with id: {}", id);
+        if (!fileRepository.existsById(id)) {
+            log.warn("Attempt to delete non-existent file with id: {}", id);
+            throw new RuntimeException("File not found");
         }
-        System.out.println("It' works");
-        Long userId = getAuthorizedUser().getId();
-
-        if (fileRepository.findFileByUserIdAndFileName(userId, fileName).isPresent()) {
-            throw new InvalidInputDataException("This file name already exists. Please choose another file name", userId);
-        }
-
-        String hash = getHashOfFile(file);
-        byte[] fileBytes;
-        try {
-            fileBytes = file.getBytes();
-        } catch (IOException e) {
-            throw new InvalidInputDataException("Can't read the file bytes", userId);
-        }
-
-        fileRepository.save(FileDTO.builder()
-                .hash(hash)
-                .fileName(fileName)
-                .type(file.getContentType())
-                .size(file.getSize())
-                .fileByte(fileBytes)
-                .createdDate(LocalDateTime.now())
-                .user(User.builder().id(userId).build())
-                .build());
+        fileRepository.deleteById(id);
+        log.info("File deleted successfully with id: {}", id);
     }
 
-
-    public FileDTO downloadFile(String fileName) {
-        Long userId = getAuthorizedUser().getId();
-
-        FileDTO fileDTO = getFileFromStorage(fileName, userId);
-
-        return FileDTO.builder()
-                .fileName(fileDTO.getFileName())
-                .type(fileDTO.getType())
-                .fileByte(fileDTO.getFileByte())
-                .build();
-    }
-
-    public void editFileName(String fileName, FileDTO fileDTO) {
-        Long userId = getAuthorizedUser().getId();
-
-        FileDTO file = getFileFromStorage(fileName, userId);
-        file.setFileName(fileDTO.getFileName());
-
-        fileRepository.save(file);
-    }
-
-    public void deleteFile(String fileName) {
-        Long userId = getAuthorizedUser().getId();
-
-        FileDTO fileDTO = getFileFromStorage(fileName, userId);
-        fileDTO.setDelete(true);
-        fileDTO.setUpdatedDate(LocalDateTime.now());
-
-        fileRepository.save(fileDTO);
-    }
-
-    public List<FileDTO> getAllFiles(int limit) {
-        Long userId = getAuthorizedUser().getId();
-
-        List<FileDTO> filesByUserIdWithLimit = fileRepository.findFilesByUserIdWithLimit(userId, limit);
-        return filesByUserIdWithLimit.stream().filter(fileDTO -> !fileDTO.isDelete())
-                .map(fileDTO -> FileDTO.builder()
-                        .fileName(fileDTO.getFileName())
-                        .type(fileDTO.getType())
-                        .date(fileDTO.getCreatedDate())
-                        .size(fileDTO.getSize())
-                        .build())
-                .collect(Collectors.toList());
-    }
-
-    @SneakyThrows
-    private String getHashOfFile(MultipartFile file) {
-
-        MessageDigest md = MessageDigest.getInstance("MD5");
-
-        try (InputStream fis = file.getInputStream()) {
-            byte[] buffer = new byte[1024];
-            int read;
-            while ((read = fis.read(buffer)) != -1) {
-                md.update(buffer, 0, read);
-            }
-        }
-        StringBuilder result = new StringBuilder();
-        for (byte b : md.digest()) {
-            result.append(String.format("%02x", b));
-        }
-        return result.toString();
-    }
-
-    private FileDTO getFileFromStorage(String fileName, Long userId) {
-        if (fileRepository.findFileByUserIdAndFileName(userId, fileName).isEmpty()) {
-            throw new FileNotFoundException("File in storage with file name: " + fileName + " not found! User ID is:" , userId);
-        }
-        return fileRepository.findFileByUserIdAndFileName(userId, fileName).get();
-    }
-
-    public User getAuthorizedUser() {
-        final String login = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findUserByLogin(login).orElseThrow(() ->
-                new UserNotFoundException("User not found by login", 0));
+    public Optional<File> findByFilenameAndUserId(String filename, Long userId) {
+        log.debug("Searching for file '{}' for user id: {}", filename, userId);
+        return fileRepository.findByFilenameAndUserId(filename, userId);
     }
 }

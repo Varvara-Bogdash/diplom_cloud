@@ -1,60 +1,36 @@
 package service;
-import DTO.UserDTO;
 import entity.User;
-import exception.InvalidInputDataException;
-import exception.UserNotFoundException;
-import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import model.Token;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.stereotype.Service;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import repository.UserRepository;
-import security.JwtProvider;
+import java.util.Optional;
 
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthenticationService {
-
-    private final UserRepository userRepository;
-    private final JwtProvider jwtProvider;
+    private final UserService userService;
     private final PasswordEncoder passwordEncoder;
 
-    public Token login(UserDTO userDTO) {
-        User user = findUserInStorage(userDTO.getLogin());
-        if (isEquals(userDTO, user)) {
-            String accessToken = jwtProvider.generateAccessToken(user);
-            return new Token(accessToken);
+    public boolean authenticate(String username, String password) {
+        log.info("Authentication attempt for user: {}", username);
+
+        Optional<User> user = userService.findByUsername(username);
+        if (user.isEmpty()) {
+            log.warn("Authentication failed - user not found: {}", username);
+            return false;
+        }
+
+        boolean isAuthenticated = passwordEncoder.matches(password, user.get().getPassword());
+        if (isAuthenticated) {
+            log.info("User authenticated successfully: {}", username);
         } else {
-            throw new InvalidInputDataException("Wrong password", 0);
+            log.warn("Authentication failed - invalid password for user: {}", username);
         }
-    }
 
-    public String logout(String authToken, HttpServletRequest request, HttpServletResponse response) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        User user = findUserInStorage(auth.getName());
-        SecurityContextLogoutHandler securityContextLogoutHandler =
-                new SecurityContextLogoutHandler();
-        if (user != null) {
-            securityContextLogoutHandler.logout(request, response, auth);
-            jwtProvider.addAuthTokenInBlackList(authToken);
-            return user.getLogin();
-        }
-        return null;
+        return isAuthenticated;
     }
-
-    private User findUserInStorage(String login) {
-        return userRepository.findUserByLogin(login).orElseThrow(() ->
-                new UserNotFoundException("User not found by login", 0));
-    }
-
-    private boolean isEquals(@NonNull User userDTO, User userFromDatabase) {
-        return passwordEncoder.matches(userDTO.getPassword(), userFromDatabase.getPassword());
-    }
+}
 }
